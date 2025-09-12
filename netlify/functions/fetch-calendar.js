@@ -1,5 +1,5 @@
 exports.handler = async function() {
-    const CALENDAR_URL = 'https://www.newhallschoolcalendar.co.uk/CalendarSync.ashx?Cal=New%20Hall%20School%20Calendar&ID=3282&A=1';
+    const CALENDAR_URL = 'https://calendar.misocs.com/CalendarSyncPROadmin.ashx?key=CF52C09A-B97A-49B8-AAFA-3A83152FD330&A=1&D=&cal=School%20Calendar';
 
     try {
         const response = await fetch(CALENDAR_URL);
