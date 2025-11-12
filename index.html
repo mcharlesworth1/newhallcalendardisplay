@@ -56,6 +56,8 @@
         /* --- Events Display --- */
         #events-container {
             margin-top: 20px;
+            /* This makes the page changes fade in and out */
+            transition: opacity 0.3s ease-in-out;
         }
 
         .event-item {
@@ -130,85 +132,166 @@
 
             // Automatically fetch the calendar on page load
             fetchCalendar();
+            
+            // Re-fetch the calendar every 30 minutes to get updates
+            setInterval(fetchCalendar, 1800000); // 30 mins = 1,800,000 ms
         });
         
+        // --- Pagination Settings ---
+        let allTodaysEvents = [];
+        let currentPage = 0;
+        let numPages = 0;
+        const EVENTS_PER_PAGE = 6; // How many events to show at once
+        const PAGE_DURATION = 10000; // 10 seconds per page (1000 = 1s)
+        let pageInterval = null; // To hold our interval timer
+        
         // --- Calendar Fetching Function ---
-async function fetchCalendar() {
-    const fetchUrl = '/.netlify/functions/fetch-calendar';
+        async function fetchCalendar() {
+            const fetchUrl = '/.netlify/functions/fetch-calendar';
 
-    try {
-        const response = await fetch(fetchUrl);
-        if (!response.ok) {
-            throw new Error(`Function returned status: ${response.status}`);
-        }
-        const icsData = await response.text();
-        const jcalData = ICAL.parse(icsData);
-        const comp = new ICAL.Component(jcalData);
-        const allEvents = comp.getAllSubcomponents('vevent');
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); 
-        const tomorrow = new Date(today);
-        tomorrow.setDate(today.getDate() + 1);
-        const todaysEvents = [];
-        allEvents.forEach(eventComponent => {
-            const event = new ICAL.Event(eventComponent);
-            if (event.isRecurring()) {
-                const iterator = event.iterator();
-                let next;
-                while ((next = iterator.next()) && next.toJSDate() < tomorrow) {
-                    const occ = event.getOccurrenceDetails(next);
-                    if (occ.startDate.toJSDate() >= today) {
-                        todaysEvents.push({
-                            summary: event.summary,
-                            startDate: occ.startDate.toJSDate(),
-                            endDate: occ.endDate.toJSDate()
-                        });
+            try {
+                const response = await fetch(fetchUrl);
+                if (!response.ok) {
+                    throw new Error(`Function returned status: ${response.status}`);
+                }
+                const icsData = await response.text();
+                const jcalData = ICAL.parse(icsData);
+                const comp = new ICAL.Component(jcalData);
+                const allEvents = comp.getAllSubcomponents('vevent');
+                
+                // --- Updated Time Logic ---
+                const now = new Date(); // Get the *current* time
+                const today = new Date(now); // Clone 'now'
+                today.setHours(0, 0, 0, 0); // Reset 'today' to midnight
+                
+                const tomorrow = new Date(today);
+                tomorrow.setDate(today.getDate() + 1);
+                
+                const todaysEvents = [];
+                
+                allEvents.forEach(eventComponent => {
+                    const event = new ICAL.Event(eventComponent);
+                    if (event.isRecurring()) {
+                        const iterator = event.iterator();
+                        let next;
+                        while ((next = iterator.next()) && next.toJSDate() < tomorrow) {
+                            const occ = event.getOccurrenceDetails(next);
+                            
+                            // --- MODIFIED CHECK ---
+                            // Only add if it's today AND its end time is after *right now*
+                            if (occ.startDate.toJSDate() >= today && occ.endDate.toJSDate() > now) {
+                                todaysEvents.push({
+                                    summary: event.summary,
+                                    startDate: occ.startDate.toJSDate(),
+                                    endDate: occ.endDate.toJSDate()
+                                });
+                            }
+                        }
+                    } else { 
+                        const eventStartDate = event.startDate.toJSDate();
+                        const eventEndDate = event.endDate.toJSDate();
+
+                        // --- MODIFIED CHECK ---
+                        // Only add if it's today AND its end time is after *right now*
+                        if (eventStartDate < tomorrow && eventEndDate > now) {
+                            todaysEvents.push({
+                                summary: event.summary,
+                                startDate: eventStartDate,
+                                endDate: eventEndDate
+                            });
+                        }
                     }
-                }
-            } else { 
-                const eventStartDate = event.startDate.toJSDate();
-                if (eventStartDate >= today && eventStartDate < tomorrow) {
-                    todaysEvents.push({
-                        summary: event.summary,
-                        startDate: eventStartDate,
-                        endDate: event.endDate.toJSDate()
-                    });
-                }
+                });
+                
+                todaysEvents.sort((a, b) => a.startDate - b.startDate);
+                
+                // --- Call the pagination setup ---
+                setupEventPagination(todaysEvents);
+                
+            } catch (error) {
+                console.error("Error fetching or parsing calendar:", error);
+                eventsContainer.innerHTML = `<p class="status-message" style="color: red;">Could not load calendar data.</p>`;
             }
-        });
-        todaysEvents.sort((a, b) => a.startDate - b.startDate);
-        displayEvents(todaysEvents);
-    } catch (error) {
-        console.error("Error fetching or parsing calendar:", error);
-        eventsContainer.innerHTML = `<p class="status-message" style="color: red;">Could not load calendar data.</p>`;
-    }
-}
+        }
 
-        function displayEvents(events) {
+        // --- NEW Pagination Setup Function ---
+        function setupEventPagination(events) {
+            allTodaysEvents = events;
+            
+            // Clear any existing timer if we're refreshing
+            if (pageInterval) {
+                clearInterval(pageInterval);
+            }
+
             if (events.length === 0) {
                 eventsContainer.innerHTML = `<p class="status-message">🎉 No events scheduled for today!</p>`;
                 return;
             }
-            
-            eventsContainer.innerHTML = ''; 
 
-            events.forEach(event => {
-                const eventElement = document.createElement('div');
-                eventElement.className = 'event-item';
-                const timeString = formatEventTime(event.startDate, event.endDate);
-                
-                eventElement.innerHTML = `
-                    <div class="event-time">${timeString}</div>
-                    <div class="event-summary">${event.summary}</div>
-                `;
-                eventsContainer.appendChild(eventElement);
-            });
+            numPages = Math.ceil(allTodaysEvents.length / EVENTS_PER_PAGE);
+            currentPage = 0;
+
+            // Display the first page immediately
+            displayCurrentPage();
+
+            // If there's more than one page, start the cycling
+            if (numPages > 1) {
+                pageInterval = setInterval(() => {
+                    currentPage = (currentPage + 1) % numPages;
+                    displayCurrentPage();
+                }, PAGE_DURATION);
+            }
         }
+
+        // --- NEW Page Display Function ---
+        function displayCurrentPage() {
+            // Get the events for just this page
+            const startIndex = currentPage * EVENTS_PER_PAGE;
+            const endIndex = startIndex + EVENTS_PER_PAGE;
+            const pageEvents = allTodaysEvents.slice(startIndex, endIndex);
+
+            // Fade out
+            eventsContainer.style.opacity = 0;
+
+            // Wait for fade-out, then update content and fade in
+            setTimeout(() => {
+                eventsContainer.innerHTML = ''; // Clear previous page
+
+                pageEvents.forEach(event => {
+                    const eventElement = document.createElement('div');
+                    eventElement.className = 'event-item';
+                    const timeString = formatEventTime(event.startDate, event.endDate);
+                    
+                    eventElement.innerHTML = `
+                        <div class="event-time">${timeString}</div>
+                        <div class="event-summary">${event.summary}</div>
+                    `;
+                    eventsContainer.appendChild(eventElement);
+                });
+                
+                // Add a "Page 1 of 3" indicator
+                if (numPages > 1) {
+                    const pager = document.createElement('p');
+                    pager.className = 'status-message';
+                    pager.style.fontSize = '0.9em';
+                    pager.style.marginTop = '15px';
+                    pager.textContent = `Page ${currentPage + 1} of ${numPages}`;
+                    eventsContainer.appendChild(pager);
+                }
+
+                // Fade in
+                eventsContainer.style.opacity = 1;
+            }, 300); // This 300ms matches the CSS transition
+        }
+
         
         function formatEventTime(start, end) {
             const options = { hour: 'numeric', minute: '2-digit', hour12: false };
             const startTime = start.toLocaleTimeString('en-GB', options);
             
+            // Check for all-day: 
+            // 1. Start and end are same
+            // 2. Duration is 24h (or very close, ical.js can be slightly off)
             if (start.getTime() === end.getTime() || (end.getTime() - start.getTime()) >= (24 * 60 * 60 * 1000 - 1000)) {
                  return "All-day";
             }
