@@ -1,4 +1,151 @@
-// --- Calendar Fetching Function (Corrected Version) ---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Hall School Calendar</title>
+    <style>
+        /* --- General Styling --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+
+        /* --- Main Container --- */
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            text-align: center;
+            color: #c80000; /* New Hall Red */
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 2em;
+        }
+        
+        /* --- Date and Time Display --- */
+        .header-info {
+            text-align: center;
+            margin-bottom: 25px;
+            color: #3c3c3c; /* New Hall Grey */
+        }
+        #current-date {
+            font-size: 1.4em;
+            font-weight: 500;
+            margin: 0;
+        }
+        #current-time {
+            font-size: 1.1em;
+            margin: 5px 0 0;
+        }
+
+        /* --- Events Display --- */
+        #events-container {
+            margin-top: 20px;
+            /* This makes the page changes fade in and out */
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .event-item {
+            display: flex;
+            align-items: center;
+            background-color: #f8f9fa;
+            border-left: 5px solid #c80000; /* New Hall Red */
+            padding: 15px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .event-time {
+            font-weight: 600;
+            color: #3c3c3c; /* New Hall Grey */
+            margin-right: 20px;
+            min-width: 130px;
+            text-align: center;
+        }
+
+        .event-summary {
+            font-size: 1.1em;
+            color: #212529;
+        }
+        
+        .status-message {
+            text-align: center;
+            color: #6c757d;
+            font-size: 1.1em;
+            padding: 20px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <h1>New Hall School Events 🗓️</h1>
+        <div class="header-info">
+            <h2 id="current-date"></h2>
+            <p id="current-time"></p>
+        </div>
+        
+        <div id="events-container">
+            <p class="status-message">Loading calendar...</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Element References ---
+        const eventsContainer = document.getElementById('events-container');
+
+        // --- Live Date, Time, and Auto-Fetch Script ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const dateElement = document.getElementById('current-date');
+            const timeElement = document.getElementById('current-time');
+
+            // Set the date once on load
+            const today = new Date();
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            dateElement.textContent = today.toLocaleDateString('en-GB', dateOptions);
+
+            // Function to update the time every second
+            function updateTime() {
+                const now = new Date();
+                timeElement.textContent = now.toLocaleTimeString('en-GB');
+            }
+
+            updateTime(); // Run once immediately
+            setInterval(updateTime, 1000); // Then update every second
+
+            // Automatically fetch the calendar on page load
+            fetchCalendar();
+            
+            // Re-fetch the calendar every 30 minutes to get updates
+            setInterval(fetchCalendar, 1800000); // 30 mins = 1,800,000 ms
+        });
+        
+        // --- Pagination Settings ---
+        let allTodaysEvents = [];
+        let currentPage = 0;
+        let numPages = 0;
+        const EVENTS_PER_PAGE = 6; // How many events to show at once
+        const PAGE_DURATION = 10000; // 10 seconds per page (1000 = 1s)
+        let pageInterval = null; // To hold our interval timer
+        
+        // --- Calendar Fetching Function (Corrected Version) ---
         async function fetchCalendar() {
             const fetchUrl = '/.netlify/functions/fetch-calendar';
 
@@ -64,3 +211,92 @@
                 eventsContainer.innerHTML = `<p class="status-message" style="color: red;">Could not load calendar data.</p>`;
             }
         }
+
+        // --- NEW Pagination Setup Function ---
+        function setupEventPagination(events) {
+            allTodaysEvents = events;
+            
+            // Clear any existing timer if we're refreshing
+            if (pageInterval) {
+                clearInterval(pageInterval);
+            }
+
+            if (events.length === 0) {
+                eventsContainer.innerHTML = `<p class="status-message">🎉 No events scheduled for today!</p>`;
+                return;
+            }
+
+            numPages = Math.ceil(allTodaysEvents.length / EVENTS_PER_PAGE);
+            currentPage = 0;
+
+            // Display the first page immediately
+            displayCurrentPage();
+
+            // If there's more than one page, start the cycling
+            if (numPages > 1) {
+                pageInterval = setInterval(() => {
+                    currentPage = (currentPage + 1) % numPages;
+                    displayCurrentPage();
+                }, PAGE_DURATION);
+            }
+        }
+
+        // --- NEW Page Display Function ---
+        function displayCurrentPage() {
+            // Get the events for just this page
+            const startIndex = currentPage * EVENTS_PER_PAGE;
+            const endIndex = startIndex + EVENTS_PER_PAGE;
+            const pageEvents = allTodaysEvents.slice(startIndex, endIndex);
+
+            // Fade out
+            eventsContainer.style.opacity = 0;
+
+            // Wait for fade-out, then update content and fade in
+            setTimeout(() => {
+                eventsContainer.innerHTML = ''; // Clear previous page
+
+                pageEvents.forEach(event => {
+                    const eventElement = document.createElement('div');
+                    eventElement.className = 'event-item';
+                    const timeString = formatEventTime(event.startDate, event.endDate);
+                    
+                    eventElement.innerHTML = `
+                        <div class="event-time">${timeString}</div>
+                        <div class="event-summary">${event.summary}</div>
+                    `;
+                    eventsContainer.appendChild(eventElement);
+                });
+                
+                // Add a "Page 1 of 3" indicator
+                if (numPages > 1) {
+                    const pager = document.createElement('p');
+                    pager.className = 'status-message';
+                    pager.style.fontSize = '0.9em';
+                    pager.style.marginTop = '15px';
+                    pager.textContent = `Page ${currentPage + 1} of ${numPages}`;
+                    eventsContainer.appendChild(pager);
+                }
+
+                // Fade in
+                eventsContainer.style.opacity = 1;
+            }, 300); // This 300ms matches the CSS transition
+        }
+
+        
+        function formatEventTime(start, end) {
+            const options = { hour: 'numeric', minute: '2-digit', hour12: false };
+            const startTime = start.toLocaleTimeString('en-GB', options);
+            
+            // Check for all-day: 
+            // 1. Start and end are same
+            // 2. Duration is 24h (or very close, ical.js can be slightly off)
+            if (start.getTime() === end.getTime() || (end.getTime() - start.getTime()) >= (24 * 60 * 60 * 1000 - 1000)) {
+                 return "All-day";
+            }
+            
+            const endTime = end.toLocaleTimeString('en-GB', options);
+            return `${startTime} - ${endTime}`;
+        }
+    </script>
+</body>
+</html>
