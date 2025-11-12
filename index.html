@@ -283,17 +283,24 @@
         }
 
         
-        function formatEventTime(start, end) {
+       function formatEventTime(start, end) {
             const options = { hour: 'numeric', minute: '2-digit', hour12: false };
             const startTime = start.toLocaleTimeString('en-GB', options);
             
-            // Check for all-day: 
-            // 1. Start and end are same
-            // 2. Duration is 24h (or very close, ical.js can be slightly off)
-            if (start.getTime() === end.getTime() || (end.getTime() - start.getTime()) >= (24 * 60 * 60 * 1000 - 1000)) {
+            // --- NEW LOGIC ---
+
+            // 1. Check for 'All-day' (24h+ duration)
+            // We subtract 1000ms (1 sec) to be safe with how iCal calculates.
+            if ((end.getTime() - start.getTime()) >= (24 * 60 * 60 * 1000 - 1000)) {
                  return "All-day";
             }
             
+            // 2. Check for single-time events (like 'Golf @ 13:00')
+            if (start.getTime() === end.getTime()) {
+                return startTime; // Just show "13:00"
+            }
+            
+            // 3. Otherwise, it's a normal range
             const endTime = end.toLocaleTimeString('en-GB', options);
             return `${startTime} - ${endTime}`;
         }
